@@ -158,3 +158,33 @@ def delete_item(item_id: int):
             deleted = cur.fetchone()
     if not deleted:
         raise HTTPException(status_code=404, detail="Item not found")
+
+
+@app.get("/databases")
+def list_databases():
+    """List all databases on the Aurora cluster using the iam_user (rds_superuser)."""
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            dbname="postgres",
+            user=DB_USERNAME,
+            password=_get_iam_token(),
+            sslmode="require",
+            connect_timeout=10,
+        )
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT datname, pg_catalog.pg_get_userbyid(datdba) AS owner,
+                           pg_catalog.pg_encoding_to_char(encoding) AS encoding
+                    FROM pg_catalog.pg_database
+                    WHERE datistemplate = false
+                    ORDER BY datname
+                """)
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+        return {"databases": [dict(r) for r in rows], "count": len(rows)}
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"status": "error", "detail": str(exc)})
